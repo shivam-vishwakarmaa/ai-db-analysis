@@ -1,0 +1,33 @@
+{
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "mongodb": "^7.1.1",
+    "mysql2": "^3.20.0",
+    "pg": "^8.20.0"
+  },
+  "name": "ai-db-analysis-agent",
+  "version": "1.0.0",
+  "description": "A browser-based AI agent that accepts any relational database, automatically reverse-engineers its structure, profiles data quality, maps relationships into visual ER diagrams, and generates human-readable business summaries — all inside one interactive dashboard.",
+  "main": "server.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivam-vishwakarmaa/ai-db-analysis.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/shivam-vishwakarmaa/ai-db-analysis/issues"
+  },
+  "homepage": "https://github.com/shivam-vishwakarmaa/ai-db-analysis#readme"
+}

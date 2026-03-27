@@ -40,14 +40,13 @@ import {
   PieChart as PieIcon,
   LineChart as LineIcon,
   BarChart3,
+  Globe,
+  CloudDownload,
   Upload,
-  FileText,
-  GitGraph,
-  ClipboardList,
-  Brain,
   Download,
 } from "lucide-react";
 import "./index.css";
+import RelationshipMapper from "./RelationshipMapper";
 
 /* Load sql.js from local public directory (same-origin, no COEP issues) */
 async function loadSqlJs() {
@@ -62,6 +61,11 @@ async function loadSqlJs() {
   return window.initSqlJs({ locateFile: (f) => `/sql-wasm/${f}` });
 }
 
+/* ═══════════════════════════════════════════════════════════
+   AI Database Analysis Agent — Main Dashboard (RE-BUILD TRIGGER)
+   ═══════════════════════════════════════════════════════════ */
+
+/* Dynamic Gemini API Helper with auto-discovery & retry (429 backoff) */
 /* Dynamic Gemini API Helper with auto-discovery & retry (429 backoff) */
 let cachedModel = null;
 async function callGemini(
@@ -72,68 +76,138 @@ async function callGemini(
   delay = 5000,
 ) {
   try {
-    let modelToUse = cachedModel || "gemini-1.5-flash";
+    // Stage 1: Sanitize & Discovery
+    const key = apiKey?.trim();
+    if (!key)
+      throw new Error(
+        "Gemini API Key is empty. Please check your configuration.",
+      );
+
+    const versions = ["v1beta", "v1"];
+    const primaryModels = [
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-1.5-pro-latest",
+      "gemini-pro",
+    ];
+
+    let modelToUse = cachedModel || primaryModels[0];
+    let availableModels = [];
+    let discoveryError = null;
+
     if (!cachedModel) {
-      try {
-        const listResp = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-        );
-        if (listResp.ok) {
-          const listData = await listResp.json();
-          const flash = (listData.models || []).find(
-            (m) =>
-              m.name.includes("flash") &&
-              m.supportedGenerationMethods.includes("generateContent"),
-          );
-          if (flash) {
-            modelToUse = flash.name.split("/").pop();
-            cachedModel = modelToUse;
+      for (const ver of versions) {
+        try {
+          const u = `https://generativelanguage.googleapis.com/${ver}/models?key=${key}`;
+          const listResp = await fetch(u);
+          if (listResp.ok) {
+            const listData = await listResp.json();
+            availableModels = (listData.models || []).map((m) =>
+              m.name.split("/").pop(),
+            );
+            const choice =
+              primaryModels.find((p) => availableModels.includes(p)) ||
+              availableModels.find((n) => n.includes("1.5-flash")) ||
+              availableModels[0];
+            if (choice) {
+              modelToUse = choice;
+              cachedModel = modelToUse;
+              break;
+            }
+          } else {
+            discoveryError = await listResp.text();
+            console.error(`Discovery ${ver} failed:`, discoveryError);
           }
+        } catch (e) {
+          discoveryError = e.message;
         }
-      } catch (e) {
-        console.warn("Model discovery failed, using default flash.", e);
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${apiKey}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature },
-      }),
-    });
+    // Stage 2: Execution with Smart Rotation
+    const executeCall = async (ver, model) => {
+      const url = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature },
+        }),
+      });
+    };
 
-    if (resp.status === 429 && retries > 0) {
+    let finalResp = null;
+    let lastAttemptedModel = modelToUse;
+
+    // Attempt 1: The standard choice
+    finalResp = await executeCall("v1beta", modelToUse);
+    if (!finalResp.ok && finalResp.status === 404)
+      finalResp = await executeCall("v1", modelToUse);
+
+    // Attempt 2: If 404, loop through all primary models
+    if (!finalResp.ok && finalResp.status === 404) {
+      for (const pModel of primaryModels) {
+        if (pModel === modelToUse) continue;
+        lastAttemptedModel = pModel;
+        finalResp = await executeCall("v1beta", pModel);
+        if (finalResp.ok) break;
+        finalResp = await executeCall("v1", pModel);
+        if (finalResp.ok) break;
+      }
+    }
+
+    // Attempt 3: If still 404, try ANY model found during discovery
+    if (
+      !finalResp.ok &&
+      finalResp.status === 404 &&
+      availableModels.length > 0
+    ) {
+      for (const aModel of availableModels.slice(0, 5)) {
+        if (primaryModels.includes(aModel)) continue;
+        lastAttemptedModel = aModel;
+        finalResp = await executeCall("v1beta", aModel);
+        if (finalResp.ok) break;
+        finalResp = await executeCall("v1", aModel);
+        if (finalResp.ok) break;
+      }
+    }
+
+    if (finalResp.status === 429 && retries > 0) {
       let wait = delay;
       try {
-        const err = await resp.json();
+        const err = await finalResp.json();
         const delayStr =
           err?.error?.details?.find((d) => d.retryDelay)?.retryDelay || "";
         const match = delayStr.match(/(\d+)/);
         if (match) wait = (parseInt(match[1]) + 2) * 1000;
       } catch (e) {}
 
-      console.warn(
-        `Gemini 429: Rate limited. Sleeping ${wait}ms... (${retries} retries left)`,
-      );
       if (window.toast)
         window.toast(
-          `Rate limit hit. Waiting ${Math.round(wait / 1000)}s for Gemini quota reset...`,
+          `Rate limit hit. Waiting ${Math.round(wait / 1000)}s...`,
           "warning",
         );
       await new Promise((r) => setTimeout(r, wait));
       return callGemini(apiKey, prompt, temperature, retries - 1, delay * 1.5);
     }
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(
-        `API Status ${resp.status}: ${errText} (Model attempted: ${modelToUse})`,
-      );
+    if (!finalResp.ok) {
+      const errText = await finalResp.text();
+      const is404 = finalResp.status === 404;
+      let msg = `API Status ${finalResp.status}: ${errText} (Last Model: ${lastAttemptedModel})`;
+      if (is404) {
+        msg += `\n\n🔍 DIAGNOSTIC: Google says this model doesn't exist for your key. `;
+        if (availableModels.length === 0) {
+          msg += `Discovery also failed with: ${discoveryError}. This usually means the 'Generative Language API' is DISABLED in your Google AI Studio project, or your key is restricted.`;
+        } else {
+          msg += `Your key ONLY supports: [${availableModels.join(", ")}]. None of these are compatible with our analysis engine.`;
+        }
+      }
+      throw new Error(msg);
     }
-    const data = await resp.json();
+    const data = await finalResp.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text)
       throw new Error("API returned an empty response. (No content generated)");
@@ -145,18 +219,20 @@ async function callGemini(
 
 export default function App() {
   const [geminiApiKey, setGeminiApiKey] = useState(
-    import.meta.env.VITE_GEMINI_API_KEY ||
-      "AIzaSyAiU9G5MVkOLzOmkTewPdwqXQpdI3FJF8Y",
+    import.meta.env.VITE_GEMINI_API_KEY || "",
   );
   const [schemaJSON, setSchemaJSON] = useState(null);
   const [sqlEngine, setSqlEngine] = useState(null);
   const [qualityReport, setQualityReport] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
+  const [aiIngressCount, setAiIngressCount] = useState(0);
+  const [totalRowsProcessed, setTotalRowsProcessed] = useState(0);
   const [stage, setStage] = useState(0);
   const [toasts, setToasts] = useState([]);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [erSvgCache, setErSvgCache] = useState({});
   const [businessContext, setBusinessContext] = useState(null);
+  const [cloudUrl, setCloudUrl] = useState("");
   const tid = useRef(0);
 
   const toast = useCallback((msg, type = "info") => {
@@ -168,10 +244,12 @@ export default function App() {
     window.toast = toast;
   }, [toast]);
 
+  /* ── Schema loaded callback ── */
   const onSchema = useCallback(
     (schema, db) => {
       setSchemaJSON(schema);
       setSqlEngine(db);
+      setTotalRowsProcessed(schema.metadata?.total_rows || 0);
       setStage((s) => Math.max(s, 1));
       toast(
         `Schema extracted: ${schema.metadata?.total_tables} tables`,
@@ -182,6 +260,7 @@ export default function App() {
     [toast],
   );
 
+  /* ── Demo: load Chinook ── */
   async function loadDemo() {
     toast("Loading Chinook demo…");
     try {
@@ -198,14 +277,70 @@ export default function App() {
     }
   }
 
-  async function handleFile(e) {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+  /* ── Cloud Fetch Handler ── */
+  async function handleUrlFetch() {
+    if (!cloudUrl) return toast("Please enter a valid URL", "warning");
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(cloudUrl);
+    } catch (e) {
+      return toast("Invalid URL format", "error");
+    }
+
+    toast(`Fetching data from ${parsedUrl.hostname}…`);
 
     try {
-      setUploadProgress({ step: 1, max: 4, text: `Booting SQLite Engine…` });
+      setUploadProgress({
+        step: 1,
+        max: 4,
+        text: `Connecting to Cloud Source…`,
+      });
       const SQL = await loadSqlJs();
+      const resp = await fetch(cloudUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
 
+      const contentType = resp.headers.get("content-type") || "";
+      const isSqlite = cloudUrl.toLowerCase().match(/\.(sqlite|sqlite3|db)$/i);
+      const isCsv =
+        cloudUrl.toLowerCase().match(/\.csv$/i) || contentType.includes("csv");
+
+      if (isSqlite) {
+        const buf = await resp.arrayBuffer();
+        const fileName =
+          cloudUrl.split("/").pop().split("?")[0] || "Cloud_DB.sqlite";
+        const mockFile = {
+          name: fileName,
+          arrayBuffer: async () => buf,
+          size: buf.byteLength,
+          type: "application/x-sqlite3",
+        };
+        await processFiles([mockFile], SQL);
+      } else if (isCsv) {
+        const txt = await resp.text();
+        const fileName =
+          cloudUrl.split("/").pop().split("?")[0] || "cloud_data.csv";
+        const mockFile = {
+          name: fileName,
+          text: async () => txt,
+          size: txt.length,
+          type: "text/csv",
+        };
+        await processFiles([mockFile], SQL);
+      } else {
+        throw new Error(
+          "Unsupported file type. Please provide a .csv or .sqlite URL.",
+        );
+      }
+    } catch (e) {
+      toast(`Cloud Fetch Failed: ${e.message}`, "error");
+    } finally {
+      setUploadProgress(null);
+    }
+  }
+
+  /* ── Universal File/Cloud Processing Logic ── */
+  async function processFiles(files, SQL) {
+    try {
       const sqliteFile = files.find((f) =>
         f.name.match(/\.(sqlite|sqlite3|db)$/i),
       );
@@ -218,7 +353,9 @@ export default function App() {
 
       if (sqliteFile) {
         toast("Loading base SQLite database…");
-        const buf = await sqliteFile.arrayBuffer();
+        const buf = sqliteFile.arrayBuffer
+          ? await sqliteFile.arrayBuffer()
+          : new TextEncoder().encode(await sqliteFile.text());
         db = new SQL.Database(new Uint8Array(buf));
       } else {
         db = new SQL.Database();
@@ -229,7 +366,7 @@ export default function App() {
       setUploadProgress({
         step: 2,
         max: 4,
-        text: `Parsing & Parsing ${files.length} Files…`,
+        text: `Parsing ${files.length} Data Sources…`,
       });
 
       for (const f of files) {
@@ -237,9 +374,12 @@ export default function App() {
           toast(`Executing ${f.name}…`);
           const txt = await f.text();
           db.exec(txt);
-        } else if (f.name.match(/\.csv$/i)) {
+        } else if (
+          f.name.match(/\.csv$/i) ||
+          (f.type && f.type.includes("csv"))
+        ) {
           hasCsv = true;
-          toast(`Parsing ${f.name} with PapaParse…`);
+          toast(`Parsing ${f.name}…`);
           const txt = await f.text();
           const parsed = Papa.parse(txt, {
             header: true,
@@ -275,7 +415,7 @@ export default function App() {
               )
                 isBool = false;
               if (String(v).includes(".")) isInt = false;
-              if (isNaN(Date.parse(v)) || !String(v).match(/^20\\d{2}-\\d{2}/))
+              if (isNaN(Date.parse(v)) || !String(v).match(/^20\d{2}-\d{2}/))
                 isDate = false;
             }
             if (!hasVal) return "VARCHAR(255)";
@@ -290,7 +430,6 @@ export default function App() {
             `CREATE TABLE "${tbl}" (${cols.map((c, i) => `"${c}" ${types[i]}`).join(", ")});`,
           );
           db.exec("BEGIN TRANSACTION;");
-
           const BATCH_SIZE = 500;
           for (let i = 0; i < parsed.data.length; i += BATCH_SIZE) {
             const chunk = parsed.data.slice(i, i + BATCH_SIZE);
@@ -310,11 +449,10 @@ export default function App() {
             if (i % 10000 === 0)
               setUploadProgress((p) => ({
                 ...p,
-                text: `Parsing ${f.name} (${i}/${parsed.data.length})…`,
+                text: `Processing ${f.name} (${i}/${parsed.data.length})…`,
               }));
           }
           db.exec("COMMIT;");
-
           samplesObj[tbl] = parsed.data.slice(0, 3);
         }
       }
@@ -342,25 +480,25 @@ export default function App() {
           };
 
           const proposeNode = async (state) => {
+            setAiIngressCount((c) => c + state.schema.length * 3);
             setUploadProgress({
               step: 3,
               max: 4,
-              text: `LangGraph: AI Proposer Node (Attempt ${state.attempts + 1})…`,
+              text: `AI Proposer Node (Attempt ${state.attempts + 1})…`,
             });
             const prompt = `You are a Principal DB Architect.
               Schema: ${JSON.stringify(state.schema)}
               Data Samples: ${JSON.stringify(state.samples)}
               Previous Failed Hypotheses: ${JSON.stringify(state.errors)}
               
-              Infer the actual Foreign Keys mathematically. Return ONLY an un-fenced JSON array:
-              [{"from_table":"", "from_column":"", "to_table":"", "to_column":""}]`;
+              Infer the actual Foreign Keys mathematically. Also identify the primary key for each table if not already obvious. Return ONLY an un-fenced JSON object:
+              {"relationships": [{"from_table":"", "from_column":"", "to_table":"", "to_column":""}], "primary_keys": {"table_name": "column_name"}}`;
 
             const r = await callGemini(geminiApiKey, prompt, 0.1);
-
-            let p = [];
+            let p = { relationships: [], primary_keys: {} };
             try {
-              const s = r.indexOf("["),
-                e = r.lastIndexOf("]");
+              const s = r.indexOf("{"),
+                e = r.lastIndexOf("}");
               const cleanJson =
                 s !== -1
                   ? r.slice(s, e + 1)
@@ -369,121 +507,116 @@ export default function App() {
                       .replace(/```/g, "")
                       .trim();
               p = JSON.parse(cleanJson);
+              if (Array.isArray(p)) p = { relationships: p, primary_keys: {} };
             } catch (e) {
-              console.error("Gemini AI Proposer Parse Error. Raw:", r);
-              toast("AI Mapper: Invalid JSON response. Retrying...", "warning");
+              console.error("Gemini Parse Error:", r);
             }
-
-            console.log("Gemini Proposed:", p);
-            return { proposals: p, attempts: 1 };
+            return { proposals: p, attempts: state.attempts + 1 };
           };
 
           const validateNode = (state) => {
             setUploadProgress({
-              step: 3,
+              step: 4,
               max: 4,
-              text: `LangGraph: SQL Validation Node (Verifying Hypotheses)…`,
+              text: `SQL Validator Node: Checking Integrity…`,
             });
-            let v = [],
-              e = [];
-            for (const p of state.proposals) {
+            const valid = [];
+            const fails = [];
+            for (const p of state.proposals.relationships || []) {
               try {
-                const q = `SELECT COUNT(*) FROM "${p.from_table}" WHERE "${p.from_column}" IS NOT NULL AND "${p.from_column}" NOT IN (SELECT "${p.to_column}" FROM "${p.to_table}")`;
-                const r = db.exec(q);
-                if (r.length > 0 && r[0].values && r[0].values.length > 0) {
-                  const bad = r[0].values[0][0];
-                  if (bad === 0) v.push({ ...p, cardinality: "many-to-one" });
-                  else
-                    e.push(
-                      `Hypothesis ${p.from_table}.${p.from_column}->${p.to_table}.${p.to_column} failed: ${bad} orphaned rows found.`,
-                    );
-                } else {
-                  e.push(
-                    `Validation Query for ${p.from_table} returned no data.`,
-                  );
-                }
-              } catch (err) {
-                e.push(`SQL Error on ${p.from_table}: ${err.message}`);
+                const total =
+                  scalar(
+                    db,
+                    `SELECT COUNT(*) FROM "${p.from_table}" WHERE "${p.from_column}" IS NOT NULL`,
+                  ) || 0;
+                const orphan =
+                  scalar(
+                    db,
+                    `SELECT COUNT(*) FROM "${p.from_table}" WHERE "${p.from_column}" IS NOT NULL AND "${p.from_column}" NOT IN (SELECT "${p.to_column}" FROM "${p.to_table}")`,
+                  ) || 0;
+                if (total > 0 && orphan === 0)
+                  valid.push({ ...p, inferred: true });
+                else if (total > 0)
+                  fails.push({ ...p, error: `Orphaned rows found: ${orphan}` });
+              } catch (e) {
+                fails.push({ ...p, error: e.message });
               }
             }
-            console.log("Validator Results - Passed:", v, "Errors:", e);
-            return { validated: v, errors: e };
+            return {
+              validated: valid,
+              errors: [...state.errors, ...fails],
+              pkProposals: state.proposals.primary_keys || {},
+            };
           };
 
-          while (true) {
-            const pRes = await proposeNode(state);
-            state.proposals = pRes.proposals;
-            state.attempts += pRes.attempts;
+          const pResult = await proposeNode(state);
+          const vResult = validateNode({ ...state, ...pResult });
+          schema.relationships = vResult.validated;
 
-            const vRes = validateNode(state);
-            state.validated = [...state.validated, ...vRes.validated];
-            state.errors = [...state.errors, ...vRes.errors];
-
-            if (state.errors.length === 0 || state.attempts >= 3) break;
-          }
-
-          if (state.validated && state.validated.length > 0) {
-            schema.relationships = state.validated;
-
-            state.validated.forEach((rel) => {
-              const child = schema.tables.find(
-                (t) => t.name === rel.from_table,
-              );
-              const parent = schema.tables.find((t) => t.name === rel.to_table);
-
-              if (child) {
-                if (!child.foreign_keys) child.foreign_keys = [];
-                if (
-                  !child.foreign_keys.some((f) => f.column === rel.from_column)
-                ) {
-                  child.foreign_keys.push({
-                    column: rel.from_column,
-                    references_table: rel.to_table,
-                    references_column: rel.to_column,
-                  });
-                }
+          // Backfill schema metadata from AI findings
+          vResult.validated.forEach((rel) => {
+            const tbl = schema.tables.find((t) => t.name === rel.from_table);
+            if (tbl) {
+              if (
+                !tbl.foreign_keys.some((fk) => fk.column === rel.from_column)
+              ) {
+                tbl.foreign_keys.push({
+                  column: rel.from_column,
+                  references_table: rel.to_table,
+                  references_column: rel.to_column,
+                  inferred: true,
+                });
               }
+            }
+          });
 
-              if (parent) {
-                const pkCol = parent.columns.find(
-                  (c) => c.name === rel.to_column,
-                );
-                if (pkCol) pkCol.primary_key = true;
-                if (!parent.primary_keys) parent.primary_keys = [];
-                if (!parent.primary_keys.includes(rel.to_column))
-                  parent.primary_keys.push(rel.to_column);
-              }
-            });
+          Object.entries(vResult.pkProposals).forEach(([tName, pkCol]) => {
+            const tbl = schema.tables.find((t) => t.name === tName);
+            if (tbl && tbl.primary_keys.length === 0) {
+              tbl.primary_keys = [pkCol];
+              const col = tbl.columns.find((c) => c.name === pkCol);
+              if (col) col.primary_key = true;
+            }
+          });
 
+          if (vResult.validated.length > 0)
             toast(
-              `LangGraph mapped ${schema.relationships.length} relationships!`,
+              `Mapper: Proven ${vResult.validated.length} relationships!`,
               "success",
             );
-          } else {
-            console.warn(
-              "LangGraph Engine exhausted 3 attempts without validating any hypotheses.",
-              state.errors,
-            );
-            toast(
-              `AI Schema matching stalled. Data may be disjointed.`,
-              "warning",
-            );
-          }
-        } catch (err) {
-          console.error("LangGraph Agent Critical Failure:", err);
-          toast(`LangGraph Agent failed: ${err.message}`, "error");
+          else
+            toast("Mapper: No explicit relationships proven via SQL.", "info");
+        } catch (e) {
+          console.error("Agentic Mapper failed:", e);
         }
       }
-
-      setUploadProgress({ step: 4, max: 4, text: `Rendering Unified Map…` });
       onSchema(schema, db);
     } catch (e) {
-      toast(`Upload failed: ${e.message}`, "error");
+      toast(`Loading failed: ${e.message}`, "error");
     } finally {
       setUploadProgress(null);
     }
   }
 
+  // Helper for validator node
+  function scalar(db, q) {
+    try {
+      const r = db.exec(q);
+      return r.length ? r[0].values[0][0] : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* ── File Selector Handler ── */
+  async function handleFile(e) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const SQL = await loadSqlJs();
+    await processFiles(files, SQL);
+  }
+
+  /* ── Extract schema from SQL.js db ── */
   function extractSchemaFromDb(db, dbName, inputType) {
     const tableRows = db.exec(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
@@ -504,8 +637,8 @@ export default function App() {
       const columns = (info[0]?.values || []).map((r) => ({
         name: r[1],
         type: r[2] || "TEXT",
-        nullable: r[3] === 0,
-        primary_key: r[5] === 1,
+        nullable: Number(r[3]) === 0,
+        primary_key: Number(r[5]) >= 1,
         unique: false,
       }));
       const pks = columns.filter((c) => c.primary_key).map((c) => c.name);
@@ -562,15 +695,132 @@ export default function App() {
     };
   }
 
+  const generateUniversalExport = useCallback(
+    (dialect) => {
+      if (!schemaJSON || !sqlEngine) return;
+
+      let content = "";
+      let filename = `export_${dialect}_${new Date().getTime()}`;
+      let mimeType = "text/sql";
+
+      try {
+        // SQL Dialects
+        content = `-- AI Database Forensic Agent - ${dialect.toUpperCase()} Export\n`;
+        content += `-- Generated: ${new Date().toLocaleString()}\n\n`;
+
+        if (dialect === "postgres") {
+          content += `SET check_function_bodies = false;\n\n`;
+        } else if (dialect === "mysql") {
+          content += `SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n\n`;
+        }
+
+        schemaJSON.tables.forEach((table) => {
+          const q = dialect === "postgres" || dialect === "oracle" ? '"' : "`";
+          content += `-- Table: ${table.name}\n`;
+          if (dialect === "mysql")
+            content += `DROP TABLE IF EXISTS ${q}${table.name}${q};\n`;
+
+          content += `CREATE TABLE ${q}${table.name}${q} (\n`;
+
+          const colDefs = (table.columns || []).map((col) => {
+            let type = "TEXT";
+            const lt = (col.type || "").toLowerCase();
+            if (dialect === "postgres") {
+              if (lt.includes("int"))
+                type = table.primary_keys?.includes(col.name)
+                  ? "SERIAL"
+                  : "INTEGER";
+              else if (lt.includes("char")) type = "VARCHAR(255)";
+              else if (lt.includes("real") || lt.includes("float"))
+                type = "DOUBLE PRECISION";
+              else if (lt.includes("blob")) type = "BYTEA";
+            } else if (dialect === "oracle") {
+              if (lt.includes("int")) type = "NUMBER(12,0)";
+              else if (lt.includes("char")) type = "VARCHAR2(255)";
+              else if (lt.includes("real") || lt.includes("float"))
+                type = "NUMBER";
+              else if (lt.includes("blob")) type = "BLOB";
+              else type = "CLOB";
+            } else {
+              if (lt.includes("int")) type = "INT";
+              else if (lt.includes("char")) type = "VARCHAR(255)";
+              else if (lt.includes("real")) type = "DOUBLE";
+              else if (lt.includes("blob")) type = "LONGBLOB";
+              else type = "LONGTEXT";
+            }
+            let def = `  ${q}${col.name}${q} ${type}`;
+            if (
+              table.primary_keys?.includes(col.name) &&
+              dialect !== "postgres"
+            )
+              def += " NOT NULL";
+            return def;
+          });
+
+          if (table.primary_keys && table.primary_keys.length > 0) {
+            colDefs.push(
+              `  PRIMARY KEY (${table.primary_keys.map((k) => `${q}${k}${q}`).join(", ")})`,
+            );
+          }
+          content += colDefs.join(",\n");
+          content += `\n);\n\n`;
+
+          const rows = sqlEngine.exec(`SELECT * FROM \`${table.name}\``);
+          if (rows && rows[0]) {
+            const { columns, values } = rows[0];
+            values.forEach((row) => {
+              const vals = row.map((v) => {
+                if (v === null) return "NULL";
+                if (typeof v === "number") return v;
+                return `'${String(v).replace(/'/g, "''")}'`;
+              });
+              content += `INSERT INTO ${q}${table.name}${q} (${columns.map((c) => `${q}${c}${q}`).join(", ")}) VALUES (${vals.join(", ")});\n`;
+            });
+          }
+          content += `\n`;
+        });
+
+        if (dialect === "mysql") content += `SET FOREIGN_KEY_CHECKS = 1;\n`;
+        filename += ".sql";
+
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast(`${dialect.toUpperCase()} Exported successfully!`, "success");
+      } catch (err) {
+        console.error("Export failed:", err);
+        toast(`Export failed: ${err.message}`, "error");
+      }
+    },
+    [schemaJSON, sqlEngine],
+  );
+
+  /* ── Tabs config ── */
   const tabs = [
-    { id: 0, label: "Upload", icon: Upload, min: 0 },
-    { id: 1, label: "Schema", icon: FileText, min: 1 },
-    { id: 2, label: "Relationships", icon: GitGraph, min: 1 },
-    { id: 3, label: "Quality", icon: ClipboardList, min: 1 },
-    { id: 4, label: "Dictionary", icon: Book, min: 1 },
-    { id: 5, label: "Business", icon: Brain, min: 1 },
+    { id: 0, label: "Upload", icon: "📤", min: 0 },
+    { id: 1, label: "Schema", icon: "🗂", min: 1 },
+    { id: 2, label: "Relationships", icon: "🔗", min: 1 },
+    { id: 3, label: "Quality", icon: "📊", min: 1 },
+    { id: 4, label: "Dictionary", icon: "📖", min: 1 },
+    { id: 5, label: "Business Summaries", icon: "🧠", min: 1 },
+    { id: 6, label: "Privacy Guard", icon: "🛡️", min: 1 },
+    { id: 7, label: "Universal Migrator", icon: "📥", min: 1 },
   ];
-  const stages = ["Upload", "Schema", "Relationships", "Quality", "BI", "Done"];
+  const stages = [
+    "Upload",
+    "Schema",
+    "Relationships",
+    "Quality",
+    "Summaries",
+    "Audit",
+    "Done",
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
@@ -579,7 +829,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
-              <Brain className="w-5 h-5" />
+              <span className="text-lg">🧠</span>
             </div>
             <div>
               <h1 className="text-lg font-semibold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
@@ -665,24 +915,23 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex gap-2 overflow-x-auto py-1">
           {tabs.map((tab) => {
             const locked = stage < tab.min;
-            const Icon = tab.icon;
             return (
               <button
                 key={tab.id}
                 onClick={() => !locked && setActiveTab(tab.id)}
                 disabled={locked}
                 className={`
-                  flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-xl transition-all whitespace-nowrap
-                  ${
-                    activeTab === tab.id
-                      ? "bg-gray-50 text-blue-600 border-b-2 border-blue-500 shadow-sm"
-                      : locked
-                        ? "text-gray-400 cursor-not-allowed"
-                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  }
-                `}
+                flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-xl transition-all whitespace-nowrap
+                ${
+                  activeTab === tab.id
+                    ? "bg-gray-50 text-blue-600 border-b-2 border-blue-500 shadow-sm"
+                    : locked
+                      ? "text-gray-400 cursor-not-allowed"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                }
+              `}
               >
-                <Icon className="w-4 h-4" />
+                <span className="text-base">{tab.icon}</span>
                 {tab.label}
                 {locked && <span className="text-xs ml-1">🔒</span>}
               </button>
@@ -698,6 +947,9 @@ export default function App() {
             onFile={handleFile}
             onDemo={loadDemo}
             progress={uploadProgress}
+            url={cloudUrl}
+            onUrlChange={setCloudUrl}
+            onUrlFetch={handleUrlFetch}
           />
         )}
         {activeTab === 1 && schemaJSON && <SchemaTab schema={schemaJSON} />}
@@ -729,6 +981,8 @@ export default function App() {
             onErSvgReady={(key, svg) =>
               setErSvgCache((c) => ({ ...c, [key]: svg }))
             }
+            setAiIngressCount={setAiIngressCount}
+            toast={toast}
           />
         )}
         {activeTab === 5 && schemaJSON && (
@@ -738,7 +992,19 @@ export default function App() {
             geminiApiKey={geminiApiKey}
             cached={businessContext}
             onReady={setBusinessContext}
+            setAiIngressCount={setAiIngressCount}
+            toast={toast}
           />
+        )}
+        {activeTab === 6 && schemaJSON && (
+          <PrivacyAuditTab
+            schema={schemaJSON}
+            ingress={aiIngressCount}
+            total={totalRowsProcessed}
+          />
+        )}
+        {activeTab === 7 && schemaJSON && (
+          <ExportTab onExport={generateUniversalExport} />
         )}
       </main>
 
@@ -747,16 +1013,13 @@ export default function App() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`
-            px-4 py-2 rounded-lg shadow-lg text-sm font-medium border-l-4 backdrop-blur-sm
-            ${
+            className={`px-4 py-2 rounded-lg shadow-lg text-sm font-medium border-l-4 backdrop-blur-sm ${
               t.type === "success"
                 ? "bg-green-50 border-green-500 text-green-800"
                 : t.type === "error"
                   ? "bg-red-50 border-red-500 text-red-800"
                   : "bg-blue-50 border-blue-500 text-blue-800"
-            }
-          `}
+            }`}
           >
             {t.type === "success" ? "✓" : t.type === "error" ? "⚠" : "ℹ"}{" "}
             {t.msg}
@@ -768,16 +1031,16 @@ export default function App() {
 }
 
 /* ════════════════════════════════════════════════════════════
-   TAB COMPONENTS (Redesigned)
+   TAB COMPONENTS
    ════════════════════════════════════════════════════════════ */
 
-function UploadTab({ onFile, onDemo, progress }) {
+function UploadTab({ onFile, onDemo, progress, url, onUrlChange, onUrlFetch }) {
   return (
     <div className="flex items-center justify-center min-h-[70vh] p-6">
       <div className="text-center w-full max-w-2xl space-y-8">
         <div className="flex justify-center">
           <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm">
-            <Brain className="w-12 h-12 text-blue-600" />
+            <span className="text-5xl">🧠</span>
           </div>
         </div>
         <div>
@@ -785,8 +1048,8 @@ function UploadTab({ onFile, onDemo, progress }) {
             AI Database Analysis Agent
           </h2>
           <p className="text-gray-500 mt-2 max-w-md mx-auto">
-            Upload any SQLite database to get instant schema analysis, ER
-            diagrams, data quality scores, and AI-generated business summaries.
+            Upload any SQLite database or fetch from cloud to get instant schema
+            analysis, ER diagrams, stability audits, and AI insights.
           </p>
         </div>
 
@@ -816,21 +1079,53 @@ function UploadTab({ onFile, onDemo, progress }) {
             </p>
           </div>
         ) : (
-          <label className="flex flex-col items-center gap-3 p-12 rounded-2xl border-2 border-dashed border-gray-300 hover:border-blue-400 bg-white cursor-pointer transition-colors hover:shadow-md">
-            <Upload className="w-10 h-10 text-gray-400" />
-            <span className="text-sm text-gray-600">
-              Drop <span className="text-blue-600 font-mono">.sqlite</span> or
-              bulk <span className="text-emerald-600 font-mono">.csv</span> /{" "}
-              <span className="text-purple-600 font-mono">.sql</span> files
-            </span>
-            <input
-              type="file"
-              className="hidden"
-              accept=".sqlite,.db,.sqlite3,.csv,.sql"
-              multiple
-              onChange={onFile}
-            />
-          </label>
+          <div className="space-y-4">
+            <label className="flex flex-col items-center gap-3 p-12 rounded-2xl border-2 border-dashed border-gray-300 hover:border-blue-400 bg-white cursor-pointer transition-colors hover:shadow-md">
+              <Upload className="w-10 h-10 text-gray-400" />
+              <span className="text-sm text-gray-600">
+                Drop <span className="text-blue-600 font-mono">.sqlite</span> or
+                bulk <span className="text-emerald-600 font-mono">.csv</span> /{" "}
+                <span className="text-purple-600 font-mono">.sql</span> files
+              </span>
+              <input
+                type="file"
+                className="hidden"
+                accept=".sqlite,.db,.sqlite3,.csv,.sql"
+                multiple
+                onChange={onFile}
+              />
+            </label>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-200"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-gray-50 text-gray-500">OR</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest pl-1">
+                <Globe className="w-3 h-3 text-blue-600" /> Fetch from Cloud URL
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={url}
+                  onChange={(e) => onUrlChange(e.target.value)}
+                  placeholder="https://example.com/data.csv"
+                  className="flex-1 bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500/50 transition-colors"
+                />
+                <button
+                  onClick={onUrlFetch}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+                >
+                  <CloudDownload className="w-4 h-4" /> Fetch
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         <div className="relative">
@@ -1000,7 +1295,7 @@ function buildGraphvizER(schema, selTable) {
     "  rankdir=LR;",
     '  bgcolor="transparent";',
     '  node [shape=none, fontname="Inter, Helvetica, Arial, sans-serif", fontsize=10, margin=0];',
-    '  edge [fontname="Inter, Helvetica, Arial, sans-serif", fontsize=9, dir=both, color="#CBD5E1", penwidth=1.5];',
+    '  edge [fontname="Inter, Helvetica, Arial, sans-serif", fontsize=9, dir=both, color="#475569", penwidth=1.5];',
   ];
   const tables = schema.tables || [];
   const rels = schema.relationships || [];
@@ -1032,13 +1327,13 @@ function buildGraphvizER(schema, selTable) {
 
     const isWeak = pks.size > 0 && Array.from(pks).every((pk) => fks.has(pk));
     const isSelected = selTable === t.name;
-    const headerBg = isSelected ? "#FEF3C7" : isWeak ? "#FEF2F2" : "#EFF6FF";
-    const headerFg = isSelected ? "#B45309" : isWeak ? "#B91C1C" : "#1E40AF";
-    const borderColor = isSelected ? "#F97316" : "#E2E8F0";
+    const headerBg = isSelected ? "#fed7aa" : isWeak ? "#fee2e2" : "#e0f2fe";
+    const headerFg = isSelected ? "#9a3412" : isWeak ? "#991b1b" : "#0369a1";
+    const borderColor = isSelected ? "#f97316" : "#cbd5e1";
     const borderWidth = isSelected ? "2" : "1";
 
-    let html = `  ${safeName} [label=<\n    <table border="${borderWidth}" cellborder="1" cellspacing="0" cellpadding="6" color="${borderColor}" bgcolor="#FFFFFF">\n`;
-    html += `       <tr><td bgcolor="${headerBg}" colspan="3"><font color="${headerFg}" point-size="12"><b>${esc(t.name)}</b></font>${isWeak ? ' <font color="#EF4444" point-size="9">&lt;&lt;Weak&gt;&gt;</font>' : ""}</td></tr>\n`;
+    let html = `  ${safeName} [label=<\n    <table border="${borderWidth}" cellborder="1" cellspacing="0" cellpadding="6" color="${borderColor}" bgcolor="#ffffff">\n`;
+    html += `       <tr><td bgcolor="${headerBg}" colspan="3"><font color="${headerFg}" point-size="12"><b>${esc(t.name)}</b></font>${isWeak ? ' <font color="#ef4444" point-size="9">&lt;&lt;Weak&gt;&gt;</font>' : ""}</td></tr>\n`;
 
     for (const c of t.columns || []) {
       const isPk = pks.has(c.name);
@@ -1094,7 +1389,6 @@ function RelationshipsTab({ schema, erSvgCache, onErSvgReady }) {
 
   const [svg, setSvg] = useState("");
   const [loading, setLoading] = useState(false);
-
   const cacheKey = sel || "__all__";
 
   useEffect(() => {
@@ -1142,7 +1436,7 @@ function RelationshipsTab({ schema, erSvgCache, onErSvgReady }) {
     <div className="max-w-7xl mx-auto p-6 space-y-8">
       <div className="flex items-center justify-between border-b border-gray-200 pb-4">
         <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <GitGraph className="w-6 h-6 text-blue-600" />
+          <Link2 className="w-6 h-6 text-blue-600" />
           Entity-Relationship Diagram
         </h2>
       </div>
@@ -1182,7 +1476,6 @@ function RelationshipsTab({ schema, erSvgCache, onErSvgReady }) {
             </span>
           </div>
         )}
-
         {svg && (
           <TransformWrapper
             key={sel || "all"}
@@ -1197,21 +1490,21 @@ function RelationshipsTab({ schema, erSvgCache, onErSvgReady }) {
                 <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white/90 backdrop-blur-sm p-2 rounded-xl border border-gray-200 shadow-md opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => zoomIn(0.2)}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600"
                     title="Zoom In"
                   >
                     +
                   </button>
                   <button
                     onClick={() => zoomOut(0.2)}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600"
                     title="Zoom Out"
                   >
                     -
                   </button>
                   <button
                     onClick={() => resetTransform()}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600"
                     title="Reset View"
                   >
                     ↺
@@ -1258,7 +1551,11 @@ function RelationshipsTab({ schema, erSvgCache, onErSvgReady }) {
               </div>
               <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-100">
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-medium ${r.inferred ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-600"}`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-medium ${
+                    r.inferred
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
                 >
                   {r.inferred ? "Inferred" : "Explicit"}
                 </span>
@@ -1539,18 +1836,18 @@ function QualityTab({ schema, db, onReady }) {
 
   if (!report && !loading)
     return (
-      <div className="flex flex-col items-center justify-center h-96 space-y-6 p-6">
-        <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center">
-          <Activity className="w-10 h-10 text-amber-600" />
+      <div className="flex flex-col items-center justify-center h-96 space-y-4">
+        <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mb-2">
+          <Activity className="w-10 h-10 text-amber-500 animate-pulse" />
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Data Quality Engine</h2>
+        <h2 className="text-xl font-bold text-white">Data Quality Engine</h2>
         <p className="text-gray-500 max-w-sm text-center text-sm">
           Analyze completeness, integrity, and statistical distributions of your
           dataset.
         </p>
         <button
           onClick={run}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+          className="px-8 py-3 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 text-sm font-bold shadow-xl hover:scale-105 transition-transform flex items-center gap-2"
         >
           <Zap className="w-4 h-4" /> Run Quality Analysis
         </button>
@@ -1560,12 +1857,12 @@ function QualityTab({ schema, db, onReady }) {
   if (loading)
     return (
       <div className="flex flex-col items-center justify-center h-96 space-y-6">
-        <div className="relative w-16 h-16">
-          <div className="absolute inset-0 border-4 border-blue-100 rounded-full"></div>
+        <div className="relative w-24 h-24">
+          <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
           <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
         <div className="text-center">
-          <p className="text-blue-600 font-medium uppercase tracking-widest text-xs animate-pulse">
+          <p className="text-blue-400 font-bold uppercase tracking-widest text-[10px] animate-pulse">
             Analyzing Data Integrity…
           </p>
           <p className="text-gray-500 text-xs mt-1">
@@ -1666,7 +1963,9 @@ function QualityTab({ schema, db, onReady }) {
                     setSelTable(selTable === p.table ? null : p.table);
                     setSelCol(null);
                   }}
-                  className={`group border-b border-gray-100 cursor-pointer transition-all ${selTable === p.table ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                  className={`group border-b border-gray-100 cursor-pointer transition-all ${
+                    selTable === p.table ? "bg-blue-50" : "hover:bg-gray-50"
+                  }`}
                 >
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
@@ -1746,13 +2045,17 @@ function QualityTab({ schema, db, onReady }) {
                       onClick={() =>
                         setSelCol(selCol === c.name ? null : c.name)
                       }
-                      className={`border-b border-gray-100 transition-all cursor-pointer ${selCol === c.name ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                      className={`border-b border-gray-100 transition-all cursor-pointer ${
+                        selCol === c.name ? "bg-blue-50" : "hover:bg-gray-50"
+                      }`}
                     >
                       <td className="px-6 py-3 font-mono text-gray-800">
                         {c.name}
                       </td>
                       <td
-                        className={`px-4 py-3 text-center ${c.null_rate > 5 ? "text-orange-600" : "text-gray-500"}`}
+                        className={`px-4 py-3 text-center ${
+                          c.null_rate > 5 ? "text-orange-600" : "text-gray-500"
+                        }`}
                       >
                         {c.null_rate}%
                       </td>
@@ -1789,7 +2092,9 @@ function QualityTab({ schema, db, onReady }) {
               ].map((s, idx) => (
                 <div
                   key={idx}
-                  className={`p-3 rounded-xl bg-gray-50 border border-gray-100 flex flex-col items-center justify-center ${!s.s ? "opacity-40" : ""}`}
+                  className={`p-3 rounded-xl bg-gray-50 border border-gray-100 flex flex-col items-center justify-center ${
+                    !s.s ? "opacity-40" : ""
+                  }`}
                 >
                   <p className="text-[10px] uppercase font-semibold text-gray-500 tracking-widest">
                     {s.l}
@@ -1856,6 +2161,10 @@ function QualityTab({ schema, db, onReady }) {
   );
 }
 
+/* ════════════════════════════════════════════════════════════
+   DICTIONARY TAB — Two-Panel: Table Selector + Mini ER + AI Descriptions
+   ════════════════════════════════════════════════════════════ */
+
 function buildFocusedGraphvizER(schema, tableName) {
   const tbl = schema.tables.find((t) => t.name === tableName);
   if (!tbl) return "";
@@ -1897,11 +2206,11 @@ function buildFocusedGraphvizER(schema, tableName) {
           const icon = isPk ? "🔑 " : isFk ? "🔗 " : "";
           const badge = isPk ? " PK" : isFk ? " FK" : "";
           const color = isPk ? "#FCD34D" : isFk ? "#6EE7B7" : "#CBD5E1";
-          return `   <tr><td align="left" bgcolor="${isPk ? "#1E1B0A" : isFk ? "#071A12" : "#111827"}" port="${c.name}"><font color="${color}" point-size="9">${icon}${c.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}${badge} — ${c.type}</font></td></tr>`;
+          return `<tr><td align="left" bgcolor="${isPk ? "#1E1B0A" : isFk ? "#071A12" : "#111827"}" port="${c.name}"><font color="${color}" point-size="9">${icon}${c.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}${badge} — ${c.type}</font></td></tr>`;
         })
         .join("");
       const isCenter = t.name === tableName;
-      return `  "${t.name}" [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="5" bgcolor="${colorMap[t.name]}22" style="rounded">   <tr><td bgcolor="${colorMap[t.name]}" align="center"><font color="white" point-size="11"><b>${isCenter ? "★ " : ""}${t.name}</b></font></td></tr>${rows}</table>>, fillcolor="transparent", shape=none, margin=0]`;
+      return `  "${t.name}" [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="5" bgcolor="${colorMap[t.name]}22" style="rounded"><tr><td bgcolor="${colorMap[t.name]}" align="center"><font color="white" point-size="11"><b>${isCenter ? "★ " : ""}${t.name}</b></font></td></tr>${rows}</table>>, fillcolor="transparent", shape=none, margin=0]`;
     })
     .join("\n");
 
@@ -1926,6 +2235,8 @@ function DictionaryTab({
   geminiApiKey,
   erSvgCache = {},
   onErSvgReady,
+  setAiIngressCount,
+  toast,
 }) {
   const [selTable, setSelTable] = useState(schema?.tables?.[0]?.name || null);
   const [dictCache, setDictCache] = useState({});
@@ -1935,10 +2246,10 @@ function DictionaryTab({
   const [error, setError] = useState(null);
 
   const tbl = (schema?.tables || []).find((t) => t.name === selTable);
-
+  // Use the SAME buildGraphvizER as RelationshipsTab — same diagram, same cache
   useEffect(() => {
     if (!selTable) return;
-    const key = selTable;
+    const key = selTable; // same cache key that RelationshipsTab uses
     if (erSvgCache?.[key]) {
       setErSvg(erSvgCache[key]);
       return;
@@ -1987,17 +2298,17 @@ For EACH column, write exactly ONE concise sentence (max 20 words) explaining wh
 Return ONLY an unfenced JSON object where keys are column names and values are the descriptions. No markdown.`;
 
     try {
+      toast("Generating Data Dictionary…");
+      setAiIngressCount((c) => c + 3);
       const raw = await callGemini(geminiApiKey, prompt, 0.2);
-      const cleanJson = raw
-        .replace(/```json?/g, "")
-        .replace(/```/g, "")
-        .trim();
       const s = raw.indexOf("{"),
         e = raw.lastIndexOf("}");
       const dict = JSON.parse(s !== -1 ? raw.slice(s, e + 1) : "{}");
       setDictCache((c) => ({ ...c, [selTable]: dict }));
+      toast("Dictionary updated!", "success");
     } catch (err) {
       console.error("Dictionary generation failed:", err);
+      toast(`Dictionary failed: ${err.message}`, "error");
     }
     setLoading(false);
   }
@@ -2090,7 +2401,11 @@ Return ONLY an unfenced JSON object where keys are column names and values are t
                   <button
                     key={t.name}
                     onClick={() => setSelTable(t.name)}
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${selTable === t.name ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                      selTable === t.name
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
                   >
                     {t.name}
                   </button>
@@ -2316,6 +2631,8 @@ function BusinessContextTab({
   geminiApiKey,
   cached,
   onReady,
+  setAiIngressCount,
+  toast,
 }) {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState(cached);
@@ -2403,6 +2720,7 @@ Guidelines:
 - Output ONLY the markdown report content. No conversational filler.`;
 
     try {
+      setAiIngressCount((c) => c + schema.tables.length * 2);
       const text = await callGemini(geminiApiKey, prompt, 0.3);
       setReport(text || "No report generated.");
       onReady(text);
@@ -2415,6 +2733,7 @@ Guidelines:
     setLoading(false);
   }
 
+  // Simple Markdown-ish renderer
   const renderContent = (text) => {
     return text.split("\n").map((line, i) => {
       if (line.startsWith("### "))
@@ -2481,11 +2800,11 @@ Guidelines:
           <div className="text-6xl animate-bounce">🧠</div>
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Deep Business Analysis
+              Business Summaries
             </h2>
             <p className="text-gray-500 text-sm max-w-sm">
               The agent will now analyze your schema, relationships, and data
-              quality to generate a comprehensive BI report.
+              quality to generate comprehensive business summaries.
             </p>
           </div>
           <button
@@ -2520,6 +2839,230 @@ Guidelines:
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PrivacyAuditTab({ schema, ingress, total }) {
+  const percent = total > 0 ? ((ingress / total) * 100).toFixed(4) : 0;
+
+  return (
+    <div className="max-w-4xl mx-auto p-8 space-y-8 animate-in fade-in duration-500">
+      <div className="flex items-center gap-4 bg-emerald-50 border border-emerald-200 p-6 rounded-3xl">
+        <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-600">
+          <ShieldCheck className="w-8 h-8" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">
+            Privacy Guard Audit
+          </h2>
+          <p className="text-sm text-gray-600">
+            This real-time forensic audit proves that sensitive data never
+            leaves your browser.
+          </p>
+        </div>
+        <div className="ml-auto px-4 py-2 rounded-xl bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest">
+          Verified Local
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white border border-gray-200 p-6 rounded-2xl space-y-2 shadow-sm">
+          <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+            Total Rows Processed
+          </div>
+          <div className="text-3xl font-black text-gray-900">
+            {(total || 0).toLocaleString()}
+          </div>
+          <div className="text-[10px] text-gray-500">
+            Handled exclusively in WASM RAM
+          </div>
+        </div>
+        <div className="bg-white border border-gray-200 p-6 rounded-2xl space-y-2 shadow-sm">
+          <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+            Rows Sent to AI
+          </div>
+          <div className="text-3xl font-black text-blue-600">
+            {(ingress || 0).toLocaleString()}
+          </div>
+          <div className="text-[10px] text-gray-500">
+            Non-sensitive schema samples only
+          </div>
+        </div>
+        <div className="bg-white border border-gray-200 p-6 rounded-2xl space-y-2 shadow-sm">
+          <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+            Leakage Ratio
+          </div>
+          <div className="text-3xl font-black text-emerald-600">{percent}%</div>
+          <div className="text-[10px] text-gray-500">
+            Target: Low transparency ratio
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-3xl overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-800">
+            Data Traffic Forensic Tracers
+          </h3>
+          <div className="flex gap-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+              <div className="w-2 h-2 rounded-full bg-emerald-500" /> Local Safe
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+              <div className="w-2 h-2 rounded-full bg-blue-500" /> AI Ingress
+            </div>
+          </div>
+        </div>
+        <div className="p-8 space-y-6">
+          <div className="flex justify-between items-end">
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-gray-800 flex items-center gap-2">
+                <Database className="w-3 h-3 text-emerald-600" /> Your Local
+                Browser (WASM)
+              </div>
+              <div className="text-[10px] text-gray-500">
+                SQL.js Engine Virtualized Container
+              </div>
+            </div>
+            <div className="text-xs font-mono text-emerald-600">
+              99.99% Local Persistence
+            </div>
+          </div>
+
+          <div className="relative h-4 w-full bg-gray-100 rounded-full overflow-hidden flex">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-1000"
+              style={{ width: `${100 - percent}%` }}
+            ></div>
+            <div
+              className="h-full bg-blue-500 transition-all duration-1000"
+              style={{ width: `${percent}%` }}
+            ></div>
+          </div>
+
+          <div className="flex justify-between items-start text-center">
+            <div className="w-1/3 p-4 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="text-[10px] text-gray-500 uppercase font-black mb-1">
+                Row Identity
+              </div>
+              <div className="text-emerald-600 text-xs font-bold">
+                100% PRIVATE
+              </div>
+            </div>
+            <div className="w-1/3 p-4 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="text-[10px] text-gray-500 uppercase font-black mb-1">
+                Financial Values
+              </div>
+              <div className="text-emerald-600 text-xs font-bold">EXCLUDED</div>
+            </div>
+            <div className="w-1/3 p-4 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="text-[10px] text-gray-500 uppercase font-black mb-1">
+                Schema Metadata
+              </div>
+              <div className="text-blue-600 text-xs font-bold">INGRESSED</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-4">
+        <Info className="w-5 h-5 text-blue-600 shrink-0" />
+        <p className="text-xs text-gray-600 leading-relaxed">
+          The AI Forensic Agent only sends table structures and anonymized 3-row
+          samples to the Gemini API for relationship mapping. No actual
+          row-level data is ever stored on any server or used for training.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ExportTab({ onExport }) {
+  const dialects = [
+    {
+      id: "mysql",
+      label: "MySQL",
+      icon: "🐬",
+      color: "blue",
+      desc: "Standard relational export for web apps.",
+    },
+    {
+      id: "postgres",
+      label: "PostgreSQL",
+      icon: "🐘",
+      color: "indigo",
+      desc: "Industrial-strength standard-compliant SQL.",
+    },
+    {
+      id: "oracle",
+      label: "Oracle",
+      icon: "🧱",
+      color: "red",
+      desc: "Secure enterprise-grade database migration.",
+    },
+  ];
+
+  return (
+    <div className="max-w-6xl mx-auto p-12 space-y-12 animate-in fade-in duration-700">
+      <div className="text-center space-y-4">
+        <h2 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-600">
+          Universal Migrator
+        </h2>
+        <p className="text-gray-500 max-w-2xl mx-auto text-base">
+          Select your target database dialect. The agent will generate a
+          performance-optimized migration script specifically for your chosen
+          environment.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {dialects.map((d) => (
+          <div
+            key={d.id}
+            className="group relative bg-white border border-gray-200 hover:border-blue-300 p-8 rounded-[2.5rem] transition-all hover:shadow-md overflow-hidden"
+          >
+            <div
+              className={`absolute top-0 right-0 w-32 h-32 bg-${d.color}-50 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-${d.color}-100 transition-colors`}
+            />
+            <div className="relative space-y-6">
+              <div
+                className={`w-16 h-16 rounded-2xl bg-${d.color}-100 flex items-center justify-center text-3xl group-hover:scale-110 transition-transform`}
+              >
+                {d.icon}
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-gray-800 group-hover:text-blue-600 transition-colors">
+                  {d.label}
+                </h3>
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  {d.desc}
+                </p>
+              </div>
+              <button
+                onClick={() => onExport(d.id)}
+                className={`w-full py-4 rounded-2xl bg-gray-100 hover:bg-blue-600 text-gray-700 hover:text-white font-bold text-sm tracking-widest uppercase transition-all shadow-sm group-hover:shadow-md active:scale-95`}
+              >
+                Generate Script
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-8 bg-blue-50 border border-blue-200 rounded-[2rem] flex items-center gap-6">
+        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+          ✨
+        </div>
+        <p className="text-sm text-gray-600 leading-relaxed">
+          The{" "}
+          <span className="text-blue-600 font-bold uppercase tracking-wider text-[10px]">
+            Universal Migrator
+          </span>{" "}
+          uses high-performance local buffering to handle thousands of rows
+          instantly without hitting AI token limits.
+        </p>
+      </div>
     </div>
   );
 }
