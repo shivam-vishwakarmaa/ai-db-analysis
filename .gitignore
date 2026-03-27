@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+dist/
+build/
+
+# Python outputs (keep in git via .gitkeep)
+python/outputs/*.json
+python/outputs/*.png
+python/outputs/*.mmd
+python/outputs/*.md
+!python/outputs/.gitkeep
+
+# Data files (add manually or download)
+data/olist/*.csv
+data/chinook/*.db
+data/sample/*.db
+!data/**/.gitkeep
