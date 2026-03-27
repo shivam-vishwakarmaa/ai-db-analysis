@@ -1,7 +1,6 @@
 # AI Database Analysis Agent
 
 [![React](https://img.shields.io/badge/React-18.2%2B-61DAFB?logo=react)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-5.0%2B-646CFF?logo=vite)](https://vitejs.dev/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js)](https://nodejs.org/)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/downloads/)
 [![Gemini API](https://img.shields.io/badge/Google%20Gemini-AI-FF6F00?logo=google)](https://ai.google.dev/)
@@ -10,102 +9,91 @@
 
 1. [Project Overview](#project-overview)
 2. [Features](#features)
-3. [Architecture & Privacy](#architecture--privacy)
-4. [Prerequisites](#prerequisites)
-5. [Installation & Setup](#installation--setup)
-6. [Configuration](#configuration)
-7. [Running the Application](#running-the-application)
-8. [API Documentation](#api-documentation)
+3. [Prerequisites](#prerequisites)
+4. [Installation & Setup](#installation--setup)
+5. [Configuration](#configuration)
+6. [Running the Application](#running-the-application)
+7. [API Documentation](#api-documentation)
+8. [Architecture](#architecture)
 9. [Technology Stack](#technology-stack)
 10. [Project Structure](#project-structure)
-11. [Troubleshooting](#troubleshooting)
-12. [License](#license)
+11. [Development Guide](#development-guide)
+12. [Troubleshooting](#troubleshooting)
+13. [Contributing](#contributing)
+14. [Documentation](#documentation)
+15. [License](#license)
 
 ---
 
 ## Project Overview
 
-The **AI Database Analysis Agent** is a powerful, browser-based forensic tool that accepts any relational database, automatically reverse-engineers its structure, profiles data quality, maps relationships into visual Entity-Relationship (ER) diagrams, and generates human-readable business summaries.
-
-Built with a **privacy-first architecture**, the core analysis engine runs locally in your browser using WebAssembly (WASM), ensuring that your raw data never leaves your machine. Only lightweight schema metadata is passed to the AI (Google Gemini) for generating insights, dictionaries, and relationship maps.
+**AI Database Analysis Agent** is a comprehensive browser-based forensic platform that automatically reverse-engineers relational database structures, profiles data quality, maps relationships into visual ER diagrams, and generates human-readable business summaries. The system integrates secure local WebAssembly processing with AI-driven insights to provide actionable analytics without compromising data privacy.
 
 ### Key Features:
 
-- Universal database ingestion (SQLite, CSV, PostgreSQL, MySQL, MongoDB)
+- Multi-source database ingestion (SQLite, CSV, PostgreSQL, MySQL, MongoDB)
 - Automated schema extraction and intelligent relationship inference
 - Statistical data quality profiling and health scoring
-- AI-generated data dictionaries and business context reports
-- Interactive Graphviz ER diagrams
+- Interactive Graphviz Entity-Relationship (ER) diagram generation
+- AI-powered data dictionaries and business context reports
 - Universal Migrator for exporting DBs to Postgres, MySQL, or Oracle
 - 100% Client-side data execution (Privacy Guard)
+- Responsive, modern web interface
 
 ### Value Proposition:
 
-- **Accelerate Onboarding:** Instantly understand undocumented legacy databases.
-- **Ensure Data Privacy:** Analyze gigabytes of data securely within the browser sandbox.
-- **Automate Documentation:** Replace weeks of manual data dictionary writing with AI generation.
-- **Streamline Migrations:** Export and migrate schemas between different SQL dialects flawlessly.
+- **Accelerate onboarding** by instantly understanding undocumented legacy databases
+- **Ensure strict data privacy** by analyzing datasets securely within the browser sandbox
+- **Automate documentation** by replacing weeks of manual data dictionary writing with AI generation
+- **Streamline platform migrations** with flawlessly generated SQL export scripts
 
 ---
 
 ## Features
 
-### 1. Multi-Source Data Ingestion (Upload Tab)
+### Core Functionality
 
-- Drag-and-drop support for `.sqlite`, `.db`, `.csv`, and `.sql` dump files.
-- Fetch remote data directly via Cloud URLs.
-- Node.js backend integration for live connections to PostgreSQL, MySQL, and MongoDB.
+**Multi-Source Data Ingestion**
 
-### 2. Schema Intelligence (Schema Tab)
+- Drag & drop file upload for `.sqlite`, `.db`, `.csv`, and `.sql` dump files
+- Fetch remote data directly via Cloud URLs
+- Live Node.js backend integration for PostgreSQL, MySQL, and MongoDB
 
-- Automated extraction of tables, columns, data types, and nullability constraints.
-- Primary Key (PK) and Foreign Key (FK) detection.
-- Quick preview of table metadata and top 5 sample rows.
+**Schema Intelligence & Analysis**
 
-### 3. Entity-Relationship Mapping (Relationships Tab)
+- Automated extraction of tables, columns, and data types
+- Identification of Primary Keys (PK) and Foreign Keys (FK)
+- Quick preview of table metadata and top 5 sample rows
 
-- AI-powered LangGraph automatic mapper to infer missing relationships mathematically.
-- Dynamic, interactive ER diagrams rendered using Graphviz and Kroki.
-- Zoom, pan, and modular viewing (all tables vs. specific table clusters).
+**Entity-Relationship Mapping**
 
-### 4. Data Quality Engine (Quality Tab)
+- AI-powered LangGraph automatic mapper to mathematically infer missing relationships
+- Dynamic, interactive ER diagrams rendered using Graphviz and Kroki
+- Modular viewing (all tables vs. specific table clusters) with zoom and pan
 
-- Calculates a global "Health Score" (0-100) based on data completeness and freshness.
-- Statistical profiling: mean, min, max, null rates, and uniqueness percentages.
-- Orphan row detection for broken foreign key constraints.
-- Automated anomaly feed alerting you to critical data integrity issues.
+**Data Quality Engine**
 
-### 5. AI Data Dictionary (Dictionary Tab)
+- Global "Health Score" (0-100) based on data completeness and freshness
+- Statistical profiling: mean, min, max, null rates, and uniqueness percentages
+- Orphan row detection for broken foreign key constraints
+- Automated anomaly feed alerting to critical data integrity issues
 
-- Seamless Google Gemini API integration.
-- Generates concise, business-readable descriptions for every column in your database.
-- Interactive two-panel layout linking the generated dictionary with mini-ER diagrams.
+**AI-Generated Business Context**
 
-### 6. Business Context Summaries (Summaries Tab)
+- Google Gemini API integration for natural language insights
+- Auto-generated, business-readable descriptions for every database column
+- Comprehensive Markdown reports detailing core entities and workflow lifecycles
 
-- Acts as a Principal Data Architect to synthesize your schema into a professional Markdown report.
-- Infers core business entities, workflow lifecycles, and key KPIs based on data structures.
+**Universal Migrator**
 
-### 7. Privacy Guard (Audit Tab)
+- Translates current database schema and row data into target-specific syntax
+- 1-click optimized export scripts for MySQL, PostgreSQL, and Oracle
 
-- Real-time forensic tracer proving zero data leakage.
-- Shows exact byte/row metrics of what is processed locally via WASM vs. what metadata is ingressed to the LLM.
+**Data Management & Privacy**
 
-### 8. Universal Migrator (Export Tab)
-
-- Translates the current database schema and row data into target-specific syntax.
-- Supports 1-click exports to **MySQL**, **PostgreSQL**, and **Oracle**.
-
----
-
-## Architecture & Privacy
-
-The system uses a hybrid, privacy-centric architecture:
-
-1. **Local WASM Processing:** When a user uploads a `.sqlite` or `.csv` file, the file is loaded directly into the browser's memory using `sql.js` (SQLite compiled to WebAssembly). The row-level data _never_ touches a backend server.
-2. **Metadata Ingress:** For AI features, only structural metadata (table names, column names, types) and a maximum of 3 anonymized sample rows are sent to the Gemini API.
-3. **Remote Connectors:** For live databases (Postgres/MySQL/Mongo), a lightweight Node.js Express server acts as a bridge, querying the system catalogs (`information_schema`) to extract metadata without downloading the full datasets.
-4. **Python Pipeline:** A standalone CLI pipeline (`pipeline.py`) is provided for developers who wish to run the entire analysis offline or via CI/CD scripts.
+- Real-time forensic tracer proving zero row-level data leakage
+- LocalStorage session persistence
+- Complete JSON state export functionality
 
 ---
 
@@ -114,13 +102,26 @@ The system uses a hybrid, privacy-centric architecture:
 ### System Requirements
 
 - **OS:** Windows, macOS, or Linux
-- **Memory:** Minimum 4GB RAM (8GB recommended for large local databases)
+- **Memory:** Minimum 4GB RAM (8GB recommended for large datasets)
+- **Storage:** At least 500MB free space
 
 ### Required Software
 
-- **Frontend & Node API:** Node.js 18.0+ and npm 8.0+
-- **Python CLI Pipeline:** Python 3.8+ and pip
-- **Google Gemini API Key:** Get your free key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+**Backend & API:**
+
+- Node.js 18.0 or higher
+- npm 8.0 or higher
+
+**Python Pipeline (Optional CLI):**
+
+- Python 3.8 or higher
+- pip (Python package manager)
+
+### API Keys
+
+- **Google Gemini API Key** (for AI explanations and summaries)
+  - Sign up at: https://ai.google.dev/
+  - Get API key from: https://makersuite.google.com/app/apikey
 
 ---
 
@@ -132,32 +133,131 @@ The system uses a hybrid, privacy-centric architecture:
 git clone [https://github.com/shivam-vishwakarmaa/ai-db-analysis.git](https://github.com/shivam-vishwakarmaa/ai-db-analysis.git)
 cd ai-db-analysis
 
-Step 2: Frontend SetupBashcd frontend
-npm install
-Step 3: Node.js Remote Connection API SetupBash# From the project root
-npm install
-Step 4: Python Pipeline Setup (Optional)Bashcd python
-python -m venv venv
+Step 2: Node API & Frontend Setup
+2.1 Install Root Backend Dependencies
 
+Bash
+npm install
+Expected packages:
+
+express>=5.2.1
+
+cors>=2.8.6
+
+mongodb>=7.1.1
+
+mysql2>=3.20.0
+
+pg>=8.20.0
+
+2.2 Install Frontend Dependencies & Build
+Bash
+cd frontend
+npm install
+npm run build
+Step 3: Python Pipeline Setup (CLI Extension)
+3.1 Create Virtual Environment
+Bash
+cd python
 # Windows
+python -m venv venv
 venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
 
+# macOS/Linux
+python3 -m venv venv
+source venv/bin/activate
+3.2 Install Python Dependencies
+Bash
 pip install -r ../requirements.txt
-⚙️ ConfigurationCreate a .env file in the frontend directory (for the React app) and the root directory (for the Python CLI):frontend/.envCode snippet# Required for AI Dictionary & Summaries
+⚙️ Configuration
+1. Create Environment Files
+Create a .env file in the frontend directory and the project root:
+
+Bash
+touch frontend/.env  # macOS/Linux
+touch .env           # macOS/Linux
+2. Configure Environment Variables
+Add the following to your frontend/.env file:
+
+Code snippet
+# API Configuration for Frontend React
 VITE_GEMINI_API_KEY=your-google-gemini-api-key-here
-Root .env (for Python)Code snippetGEMINI_API_KEY=your-google-gemini-api-key-here
-Running the Application1. Start the React FrontendThis is the primary user interface.Bashcd frontend
-npm run dev
-Access the application at http://localhost:51732. Start the Node.js API (For live remote databases)Run this if you want to connect to remote Postgres, MySQL, or MongoDB instances.Bash# From the project root
+Add the following to your root .env file (for Python CLI):
+
+Code snippet
+# API Configuration for Python Scripts
+GEMINI_API_KEY=your-google-gemini-api-key-here
+3. Get Your Google Gemini API Key
+Go to Google AI Studio
+
+Click "Create API Key"
+
+Copy the generated key
+
+Paste it into both .env files.
+
+4. Verify Configuration
+Bash
+node -e "require('dotenv').config(); console.log('Gemini Key Exists:', !!process.env.GEMINI_API_KEY)"
+Running the Application
+Option 1: Development Mode (Recommended for First-Time Setup)
+Terminal 1: Node.js Backend Server (For Live Databases)
+Bash
+# From project root
 npm start
-The API will listen on http://localhost:30013. Run the Python CLI Pipeline (Headless Mode)Use the Python script to run automated analysis on a database without the UI.Bashcd python/src
+Expected output:
+
+API listening on 3001
+Terminal 2: Frontend Development Server
+Bash
+cd frontend
+npm run dev
+Expected output:
+
+  VITE v5.0.0  ready in XXX ms
+
+  ➜  Local:   http://localhost:5173/
+Access the application: http://localhost:5173
+
+Option 2: Python CLI Pipeline (Headless Mode)
+Run automated analysis on a database without the UI:
+
+Bash
+cd python/src
 python pipeline.py --input ../../sample_data/chinook.db --type sqlite --output-dir ../../outputs
-API DocumentationThe Node.js backend provides a bridge to connect to live SQL/NoSQL databases.Extract Remote SchemaEndpoint: POST /api/connectDescription: Connects to a provided database string, extracts the schema via information_schema, and returns a unified JSON format compatible with the frontend agent.Request Body:JSON{
-  "connectionString": "postgresql://user:password@localhost:5432/mydb"
-}
-Supports postgresql://, mysql://, and mongodb:// formats.Response (200 OK):JSON{
+Expected output:
+
+▶ Step 1/5: Loading database…
+  ✓ Loaded 11 tables, 15,200 rows
+Option 3: Docker (Optional)
+Bash
+# Build Docker image
+docker build -t aidbanalysis:latest .
+
+# Run container
+docker run -p 5173:5173 -p 3001:3001 \
+  -e VITE_GEMINI_API_KEY=your-api-key \
+  aidbanalysis:latest
+API Documentation
+Base URL
+http://localhost:3001/api
+Endpoints
+1. Live Database Connection & Extraction
+Endpoint: POST /api/connect
+
+Description: Connects to a provided database string (Postgres/MySQL/MongoDB), extracts the schema via system catalogs (information_schema), and returns a unified JSON format compatible with the frontend agent.
+
+Request Headers:
+
+Content-Type: application/json
+Request Parameters:
+
+Parameter	Type	Required	Description
+connectionString	string	Yes	Standard DB connection URI
+Response (200 OK):
+
+JSON
+{
   "schema": {
     "metadata": {
       "database_name": "mydb",
@@ -167,32 +267,209 @@ Supports postgresql://, mysql://, and mongodb:// formats.Response (200 OK):JSON{
       "total_rows": 45000,
       "fk_source": "inferred"
     },
-    "tables": [ ... ],
-    "relationships": [ ... ]
+    "tables": [
+      {
+        "name": "users",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "primary_key": true,
+            "unique": true
+          }
+        ],
+        "primary_keys": ["id"],
+        "foreign_keys": [],
+        "row_count": 1250,
+        "sample_data": [{"id": 1}],
+        "indexes": []
+      }
+    ],
+    "relationships": []
   }
 }
-🛠️ Technology StackFrontend ApplicationTechnologyPurposeReact 18UI FrameworkViteBuild Tool & Dev ServerTailwind CSSStyling & UI Gridsql.js (WASM)In-browser SQLite execution & parsingRechartsData quality visualizationPapaParseCSV to SQLite conversionBackend API & CLITechnologyPurposeNode.js / ExpressRemote database connector APIpg / mysql2 / mongodbDatabase-specific driversPython 3Standalone analysis pipelineGoogle Gemini APILLM for Business Summaries and DictionariesKroki / GraphvizER Diagram renderingProject StructurePlaintextai-db-analysis/
-├── frontend/                 # React UI Application
-│   ├── public/
-│   │   └── sql-wasm/         # Pre-compiled WebAssembly SQLite engine
-│   ├── src/
-│   │   ├── App.jsx           # Main Dashboard and Logic
-│   │   ├── RelationshipMapper.jsx
-│   │   ├── index.css         # Tailwind globals
-│   │   └── main.jsx
-│   ├── package.json
-│   └── vite.config.js
-│
-├── python/                   # Standalone Python Analysis Pipeline
-│   └── src/
-│       ├── pipeline.py       # Master CLI orchestrator
-│       ├── ai_generator.py   # LLM context generation
-│       ├── quality_profiler.py
-│       └── schema_extractor.py
-│
-├── server.js                 # Node.js API for live DB connections
-├── package.json              # Node.js dependencies
-└── README.md                 # This documentation
+Error Response (400 Bad Request):
 
-TroubleshootingIssue: "API Status 404: Model not found"Solution: The default Gemini models (gemini-1.5-flash) might not be enabled in your region or for your API key. The app includes a smart fallback mechanism, but ensure that the Generative Language API is enabled in your Google Cloud / AI Studio console.Issue: "WASM module failed to load"Solution: Ensure you are running the frontend via npm run dev or a proper web server. Loading WASM files directly from the file:// protocol in the browser is blocked by default CORS/security policies.Issue: Large CSV uploads crash the browserSolution: The application batches CSV inserts (500 rows at a time). However, files larger than 100MB may exhaust browser RAM. For massive datasets, use the Python CLI pipeline instead.Issue: Node backend cannot connect to MySQL/PostgresSolution: Ensure the database server is running, the port is accessible, and the connection string contains the correct username, password, and host parameters.LicenseThis project is licensed under the ISC License.
+JSON
+{
+  "error": "Unsupported database type"
+}
+Example cURL:
+
+Bash
+curl -X POST "http://localhost:3001/api/connect" \
+  -H "Content-Type: application/json" \
+  -d '{"connectionString":"postgresql://user:password@localhost:5432/mydb"}'
+Example JavaScript (Fetch):
+
+JavaScript
+const response = await fetch("http://localhost:3001/api/connect", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    connectionString: "mysql://root:password@localhost:3306/ecommerce"
+  })
+});
+
+const results = await response.json();
+console.log(results);
+Response Data Model
+TableSchema
+JSON
+{
+  "name": "table_name",
+  "columns": ["ColumnData"],
+  "primary_keys": ["id"],
+  "foreign_keys": ["ForeignKeyData"],
+  "row_count": 1000,
+  "sample_data": [{}]
+}
+ColumnData
+JSON
+{
+  "name": "status",
+  "type": "VARCHAR(255)",
+  "nullable": false,
+  "primary_key": false,
+  "unique": false
+}
+ForeignKeyData
+JSON
+{
+  "column": "user_id",
+  "references_table": "users",
+  "references_column": "id",
+  "inferred": true
+}
+HTTP Status Codes
+Status	Description
+200	Successful connection and extraction
+400	Bad request (missing URI or unsupported)
+500	Internal server error (DB unreachable)
+Architecture
+System Architecture Diagram
+┌─────────────────────────────────────────────────┐
+│         React Frontend (Vite + Tailwind)        │
+│  - WASM SQLite Engine (sql.js)                  │
+│  - Interactive Dashboard & ER Rendering         │
+│  - Real-time result visualization               │
+│  - Privacy Guard Validation                     │
+└─────────────────────┬───────────────────────────┘
+                      │ HTTP/REST
+┌─────────────────────┴───────────────────────────┐
+│        Node.js API (Express + Database Drivers) │
+│  - Live DB Schema Extraction                    │
+│  - Supports PG, MySQL, MongoDB                  │
+│  - CORS middleware                              │
+└─────────────────────┬───────────────────────────┘
+                      │
+    ┌─────────────────┼─────────────────┐
+    │                 │                 │
+┌───▼────┐    ┌──────▼──────┐    ┌──────▼────┐
+│ Schema │    │   Analysis  │    │  Google   │
+│ Parser │    │   Engine    │    │  Gemini   │
+│        │    │  (LangGraph)│    │   API     │
+└────────┘    └─────────────┘    └───────────┘
+Data Flow Pipeline
+1. File/URL Upload or DB Connect →
+2. WASM SQLite Execution (Local) →
+3. Schema & Metadata Extraction →
+4. Statistical Quality Profiling →
+5. LangGraph AI Relationship Proposer →
+6. SQL Validator Node (Integrity Checks) →
+7. Graphviz ER Diagram Rendering →
+8. Gemini LLM Business Summary Generation →
+9. Universal SQL Migration Export
+🛠️ Technology Stack
+Frontend
+Technology	Version	Purpose
+React	18.2+	UI framework
+Vite	5.0+	Build tool & dev server
+Tailwind CSS	3.3+	Styling
+sql.js (WASM)	1.8+	Local SQLite execution
+Recharts	2.10+	Quality visualizations
+Backend & CLI
+Technology	Version	Purpose
+Node.js	18.0+	Remote DB Connector
+Express	5.2+	API Framework
+Python	3.8+	Standalone CLI Pipeline
+pg / mysql2	Latest	Database Drivers
+External Services
+Service	Purpose
+Google Gemini API	AI context & summaries
+Kroki / Graphviz	ER Diagram rendering
+Project Structure
+ai-db-analysis/
+├── frontend/                      # React UI Application
+│   ├── public/
+│   │   └── sql-wasm/              # Pre-compiled WebAssembly SQLite engine
+│   ├── src/
+│   │   ├── components/            # React components
+│   │   ├── App.jsx                # Main Dashboard
+│   │   └── index.css              # Tailwind globals
+│   ├── package.json               # Frontend dependencies
+│   └── vite.config.js             # Vite configuration
+│
+├── python/                        # Standalone Python Analysis Pipeline
+│   └── src/
+│       ├── pipeline.py            # Master CLI orchestrator
+│       ├── ai_generator.py        # LLM context generation
+│       ├── quality_profiler.py    # Statistical analysis logic
+│       └── schema_extractor.py    # Metadata extraction
+│
+├── server.js                      # Node.js API for live DB connections
+├── package.json                   # Node.js dependencies
+├── README.md                      # This file
+└── .gitignore                     # Git ignore rules
+👨‍💻 Development Guide
+Running Code Formatters
+Bash
+# Format frontend code with Prettier
+cd frontend
+npm run format
+
+# Format Python code with black (if installed)
+black python/src/
+Adding New Database Dialects
+Backend: Add endpoint parsing logic in server.js using appropriate driver libraries.
+
+Frontend Migrator: Create a new export mapping component inside App.jsx under the generateUniversalExport function.
+
+Common Development Tasks
+Bash
+# Install new Node package
+cd frontend
+npm install package-name
+
+# Install new Python package
+cd python
+pip install package-name
+pip freeze > ../requirements.txt
+Troubleshooting
+Frontend & API Issues
+Issue: "WASM module failed to load"
+
+Bash
+# Solution: Ensure you are running the frontend via a local server (npm run dev), not by opening index.html directly from the file system, due to CORS/security policies.
+Issue: "API Status 404: Model not found"
+
+Bash
+# Solution: Your Gemini API key might not have access to the default model. Ensure the "Generative Language API" is enabled in your Google Cloud / AI Studio console.
+Issue: Large CSV uploads crash the browser
+
+Bash
+# Solution: The application batches inserts (500 rows at a time), but files >100MB may exhaust browser RAM. Use the Python CLI pipeline for massive datasets.
+Common Issues
+Issue	Solution
+Remote DB connection fails	Ensure credentials and port mappings are correct in URI
+Missing ER Diagrams	Check network connectivity to kroki.io
+Empty Business Summaries	Verify VITE_GEMINI_API_KEY is properly loaded in .env
+Documentation
+Comprehensive documentation is available:
+
+Master Prompt - System prompts used for LLM interaction
+
+API Reference - Detailed backend API definitions
+
 ```
