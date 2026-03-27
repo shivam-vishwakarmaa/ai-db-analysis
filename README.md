@@ -170,35 +170,25 @@ source venv/bin/activate
 Bash
 pip install -r ../requirements.txt
 ⚙️ Configuration
-1. Create Environment Files
-Create a .env file in the frontend directory and the project root:
+Use a single `.env` at the project root (shared by frontend and Python).
 
 Bash
-touch frontend/.env  # macOS/Linux
-touch .env           # macOS/Linux
-2. Configure Environment Variables
-Add the following to your frontend/.env file:
+touch .env
+
+Add the following variables:
 
 Code snippet
-# API Configuration for Frontend React
+# Browser AI (optional)
 VITE_GEMINI_API_KEY=your-google-gemini-api-key-here
-Add the following to your root .env file (for Python CLI):
 
-Code snippet
-# API Configuration for Python Scripts
-GEMINI_API_KEY=your-google-gemini-api-key-here
-3. Get Your Google Gemini API Key
-Go to Google AI Studio
+# Python AI (optional)
+OPENROUTER_API_KEY=your-openrouter-api-key-here
 
-Click "Create API Key"
-
-Copy the generated key
-
-Paste it into both .env files.
+Note: `frontend/vite.config.js` sets `envDir: '..'`, so Vite reads from the root `.env`.
 
 4. Verify Configuration
 Bash
-node -e "require('dotenv').config(); console.log('Gemini Key Exists:', !!process.env.GEMINI_API_KEY)"
+node -e "require('dotenv').config({ path: '.env' }); console.log('Gemini Key Exists:', !!process.env.VITE_GEMINI_API_KEY)"
 Running the Application
 Option 1: Development Mode (Recommended for First-Time Setup)
 Terminal 1: Node.js Backend Server (For Live Databases)
