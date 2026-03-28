@@ -29,6 +29,10 @@
 
 **AI Database Analysis Agent** is a comprehensive browser-based forensic platform that automatically reverse-engineers relational database structures, profiles data quality, maps relationships into visual ER diagrams, and generates human-readable business summaries. The system integrates secure local WebAssembly processing with AI-driven insights to provide actionable analytics without compromising data privacy.
 
+## Architechture Diagrma and Flow 
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/cd644dab-f1bc-40b5-8271-452aa64618d0" />
+
 ### Key Features:
 
 - Multi-source database ingestion (SQLite, CSV, PostgreSQL, MySQL, MongoDB)
