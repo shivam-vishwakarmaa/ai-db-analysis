@@ -4,6 +4,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js)](https://nodejs.org/)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/downloads/)
 [![Gemini API](https://img.shields.io/badge/Google%20Gemini-AI-FF6F00?logo=google)](https://ai.google.dev/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?logo=vercel)](https://ai-db-analysis.vercel.app/)
 
 ## Table of Contents
 
