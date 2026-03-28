@@ -6,6 +6,8 @@
 [![Gemini API](https://img.shields.io/badge/Google%20Gemini-AI-FF6F00?logo=google)](https://ai.google.dev/)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?logo=vercel)](https://ai-db-analysis.vercel.app/)
 
+> 🚀 **Try it now:** [**https://ai-db-analysis.vercel.app/**](https://ai-db-analysis.vercel.app/)
+
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
