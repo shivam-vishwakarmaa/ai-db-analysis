@@ -1035,6 +1035,30 @@ export default function App() {
    ════════════════════════════════════════════════════════════ */
 
 function UploadTab({ onFile, onDemo, progress, url, onUrlChange, onUrlFetch }) {
+  const [connStr, setConnStr] = useState("");
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (!connStr.trim()) return;
+    setConnecting(true);
+    try {
+      const res = await fetch(
+        "https://ai-db-analysis.onrender.com/api/connect",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionString: connStr }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Connection failed");
+      onSchema(data.schema, null); // onSchema is passed from App
+    } catch (err) {
+      window.toast(`Connection error: ${err.message}`, "error");
+    } finally {
+      setConnecting(false);
+    }
+  };
   return (
     <div className="flex items-center justify-center min-h-[70vh] p-6">
       <div className="text-center w-full max-w-2xl space-y-8">
@@ -1127,7 +1151,40 @@ function UploadTab({ onFile, onDemo, progress, url, onUrlChange, onUrlFetch }) {
             </div>
           </div>
         )}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-gray-50 text-gray-500">OR</span>
+          </div>
+        </div>
 
+        <div className="space-y-3">
+          <label className="block text-sm font-medium text-gray-700">
+            Connect to external database
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="postgresql://user:pass@host:port/dbname"
+              value={connStr}
+              onChange={(e) => setConnStr(e.target.value)}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="px-5 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {connecting ? "Connecting..." : "Connect"}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            Supports PostgreSQL, MySQL, MongoDB. Provide connection string.
+            Backend required.
+          </p>
+        </div>
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-gray-200"></div>
